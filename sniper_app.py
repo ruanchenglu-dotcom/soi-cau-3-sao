@@ -5,9 +5,9 @@ from PIL import Image, ImageOps, ImageEnhance
 import pytesseract
 
 # --- CẤU HÌNH ---
-st.set_page_config(page_title="3-Star Sniper Pro V4", page_icon="🎯", layout="wide")
-st.title("🎯 Máy Tính Soi Cầu 3 Sao (Bản Chuẩn V4)")
-st.markdown("Quy trình: **Nhập liệu (Quét/Dán) -> Kiểm tra -> Lưu -> Phân Tích**")
+st.set_page_config(page_title="3-Star Sniper Pro V5", page_icon="🎯", layout="wide")
+st.title("🎯 Máy Tính Soi Cầu 3 Sao (Logic Chuẩn V5)")
+st.markdown("Quy trình: **Quét/Dán (Giữ nguyên thứ tự) -> Lưu (Cho phép trùng) -> Phân Tích**")
 
 # --- QUẢN LÝ DỮ LIỆU ---
 if 'lottery_data' not in st.session_state:
@@ -18,7 +18,7 @@ if 'temp_scan_result' not in st.session_state:
 
 # --- HÀM XỬ LÝ TEXT ---
 def extract_numbers(text):
-    # Regex tìm tất cả các cụm 3 chữ số (VD: 932, 296...)
+    # Regex tìm tất cả các cụm 3 chữ số
     return re.findall(r'\b\d{3}\b', text)
 
 # --- GIAO DIỆN CHÍNH ---
@@ -31,112 +31,98 @@ with col_input:
     
     # --- CÁCH 1: COPY PASTE ---
     if input_method == "📋 Copy & Dán":
-        user_text = st.text_area("Dán kết quả vào đây:", height=150, placeholder="Ví dụ: 932 296 302...")
+        user_text = st.text_area("Dán kết quả (Số mới nhất ở trên cùng):", height=150, placeholder="Ví dụ:\n932\n932\n296...")
         if st.button("📥 Lưu Dữ Liệu"):
             found = extract_numbers(user_text)
             if found:
+                # LOGIC SỬA ĐỔI QUAN TRỌNG:
+                # Để giữ nguyên thứ tự "Số đầu tiên trong văn bản là Số mới nhất",
+                # và muốn chèn nó lên đầu danh sách (index 0).
+                # Ta phải chèn ngược từ dưới lên trên vào vị trí 0.
                 count = 0
-                for num in found:
-                    if num not in st.session_state.lottery_data:
-                        st.session_state.lottery_data.insert(0, num)
-                        count += 1
-                st.success(f"Đã lưu thành công {count} số mới!")
+                for num in reversed(found): 
+                    # Đã XÓA điều kiện chặn trùng lặp (vì xổ số có thể về trùng số như 932)
+                    st.session_state.lottery_data.insert(0, num)
+                    count += 1
+                
+                st.success(f"Đã thêm {count} kỳ quay mới lên đầu danh sách!")
                 st.rerun()
             else:
-                st.warning("Không tìm thấy bộ 3 số nào hợp lệ.")
+                st.warning("Không tìm thấy bộ 3 số nào.")
 
     # --- CÁCH 2: QUÉT ẢNH (OCR) ---
     elif input_method == "📷 Quét Ảnh (OCR)":
-        st.info("💡 Mẹo: Ảnh nên chụp thẳng, rõ nét các con số.")
-        uploaded_file = st.file_uploader("Chọn ảnh kết quả (JPG/PNG)", type=['png', 'jpg', 'jpeg'])
+        st.info("💡 Lưu ý: Danh sách trong ảnh sẽ được giữ nguyên thứ tự khi đưa vào App.")
+        uploaded_file = st.file_uploader("Chọn ảnh kết quả", type=['png', 'jpg', 'jpeg'])
         
         if uploaded_file is not None:
-            # Mở ảnh
             image = Image.open(uploaded_file)
             st.image(image, caption='Ảnh gốc', use_container_width=True)
             
             if st.button("🔍 Bắt đầu Quét Số"):
                 with st.spinner('Đang xử lý ảnh...'):
                     try:
-                        # --- BƯỚC XỬ LÝ ẢNH CAO CẤP ---
-                        # 1. Chuyển sang ảnh xám (Grayscale)
+                        # XỬ LÝ ẢNH (Khử sọc xanh, làm rõ số)
                         gray_image = image.convert('L')
-                        
-                        # 2. Tăng độ tương phản để loại bỏ sọc xanh nhạt
                         enhancer = ImageEnhance.Contrast(gray_image)
-                        contrast_image = enhancer.enhance(2.0) # Tăng gấp đôi tương phản
-                        
-                        # 3. Chuyển thành đen trắng tuyệt đối (Binarization)
-                        # Những điểm ảnh sáng (sọc xanh/nền trắng) -> Thành trắng tinh
-                        # Những điểm ảnh tối (số đen) -> Thành đen tuyền
+                        contrast_image = enhancer.enhance(2.0)
                         bw_image = contrast_image.point(lambda x: 0 if x < 128 else 255, '1')
                         
-                        # Hiển thị ảnh sau khi xử lý để user biết máy nhìn thấy gì
-                        st.caption("Ảnh sau khi máy tính xử lý (Đen trắng):")
-                        st.image(bw_image, use_container_width=True)
-
-                        # 4. Cấu hình Tesseract (Chỉ đọc số)
-                        # --psm 6: Coi như một cột văn bản thống nhất
-                        # whitelist: Chỉ cho phép số 0-9
+                        # Cấu hình chỉ đọc số
                         my_config = r'--psm 6 -c tessedit_char_whitelist=0123456789'
-                        
-                        # 5. Đọc ảnh
                         text = pytesseract.image_to_string(bw_image, config=my_config)
                         
-                        # Lưu vào biến tạm
                         st.session_state.temp_scan_result = text 
-                        st.success("Đã quét xong! Hãy kiểm tra và bấm Lưu bên dưới.")
-                        
+                        st.success("Quét xong! Kiểm tra thứ tự bên dưới.")
                     except Exception as e:
-                        st.error(f"Lỗi: {e}. (Hãy chắc chắn bạn đã tạo file packages.txt trên GitHub)")
+                        st.error(f"Lỗi OCR: {e}")
 
-        # KHU VỰC HIỆN KẾT QUẢ ĐỂ SỬA
+        # KHU VỰC SỬA LỖI & LƯU
         if st.session_state.temp_scan_result:
             st.markdown("---")
-            st.markdown("🔽 **Kết quả máy đọc được (Bạn hãy sửa lại nếu sai):**")
+            st.markdown("🔽 **Kết quả (Số đầu tiên sẽ là Mới Nhất):**")
             
             edited_text = st.text_area("Chỉnh sửa:", 
                                      value=st.session_state.temp_scan_result, 
                                      height=150)
             
-            if st.button("💾 XÁC NHẬN & LƯU VÀO LỊCH SỬ"):
+            if st.button("💾 XÁC NHẬN & LƯU (LÊN ĐẦU DANH SÁCH)"):
                 found = extract_numbers(edited_text)
                 if found:
-                    new_count = 0
-                    # Đảo ngược list found để số trên cùng (mới nhất) được thêm vào đầu danh sách
-                    for num in found: 
-                        if num not in st.session_state.lottery_data:
-                            st.session_state.lottery_data.insert(0, num)
-                            new_count += 1
+                    count = 0
+                    # LOGIC SỬA ĐỔI: Chèn ngược để giữ đúng thứ tự ảnh
+                    for num in reversed(found):
+                        st.session_state.lottery_data.insert(0, num)
+                        count += 1
                     
-                    st.success(f"Đã thêm {new_count} số vào lịch sử!")
-                    st.session_state.temp_scan_result = "" # Xóa tạm
+                    st.success(f"Đã lưu {count} kỳ quay vào lịch sử!")
+                    st.session_state.temp_scan_result = ""
                     st.rerun()
                 else:
-                    st.warning("Không tìm thấy số nào. Hãy kiểm tra lại phần văn bản bên trên.")
+                    st.warning("Không tìm thấy số nào.")
 
 # === CỘT PHẢI: PHÂN TÍCH ===
 with col_data:
     st.subheader("2. Lịch Sử & Phân Tích")
     
-    # Nút xóa
     if st.button("🗑️ Xóa tất cả dữ liệu"):
         st.session_state.lottery_data = []
         st.rerun()
         
-    # Hiển thị bảng dữ liệu
     if len(st.session_state.lottery_data) > 0:
-        st.info(f"Đang có {len(st.session_state.lottery_data)} kỳ quay trong bộ nhớ.")
+        st.info(f"Đang có {len(st.session_state.lottery_data)} kỳ quay.")
         
-        # Bảng hiển thị
+        # HIỂN THỊ BẢNG (Đánh số thứ tự kỳ)
+        # Tạo DataFrame và Reset Index để có cột số thứ tự (0 là mới nhất)
         df_history = pd.DataFrame(st.session_state.lottery_data, columns=["Kết Quả"])
-        st.dataframe(df_history, height=200, use_container_width=True)
+        df_history.index.name = "Kỳ (0=Mới nhất)"
+        st.dataframe(df_history, height=250, use_container_width=True)
         
         st.markdown("---")
         # NÚT CHẠY PHÂN TÍCH
         if st.button("🚀 PHÂN TÍCH NGAY", type="primary", use_container_width=True):
             
-            # Tách số thành 3 cột
+            # Tách số
             data_split = [[int(n[0]), int(n[1]), int(n[2])] for n in st.session_state.lottery_data]
             df = pd.DataFrame(data_split, columns=["Trăm", "Chục", "Đơn Vị"])
             
@@ -151,18 +137,18 @@ with col_data:
             t_hot, t_cold, t_counts = get_stats("Chục")
             u_hot, u_cold, u_counts = get_stats("Đơn Vị")
             
-            st.success("### ✅ KẾT QUẢ DỰ ĐOÁN")
+            st.success("### ✅ DỰ ĐOÁN KẾT QUẢ")
             
-            col_res1, col_res2 = st.columns(2)
-            with col_res1:
-                st.metric("🔥 CẦU NÓNG (Nên theo)", f"{h_hot} - {t_hot} - {u_hot}")
-                st.caption("Các số đang ra nhiều nhất ở từng vị trí")
-            with col_res2:
-                st.metric("❄️ CẦU GAN (Nuôi)", f"{h_cold} - {t_cold} - {u_cold}")
-                st.caption("Các số lâu chưa ra nhất")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.metric("🔥 CẦU NÓNG (Hay về)", f"{h_hot}{t_hot}{u_hot}")
+                st.caption("Ghép 3 số ra nhiều nhất")
+            with c2:
+                st.metric("❄️ CẦU GAN (Lâu chưa về)", f"{h_cold}{t_cold}{u_cold}")
+                st.caption("Ghép 3 số 'lì lợm' nhất")
                 
-            st.markdown("**Biểu đồ tần suất:**")
+            st.write("---")
+            st.write("**Biểu đồ tần suất xuất hiện (0-9):**")
             st.bar_chart(df.apply(pd.Series.value_counts).fillna(0))
-            
     else:
-        st.warning("👈 Dữ liệu trống. Hãy nhập số liệu ở cột bên trái.")
+        st.warning("👈 Dữ liệu trống.")
